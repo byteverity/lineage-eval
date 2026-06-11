@@ -1,0 +1,80 @@
+# no-direct-to-main.policy.yaml
+# ---------------------------------------------------------------------------
+# A ready-to-use guardrail that deterministically keeps work OFF the main branch
+# (and keeps the usual secret + test gates). Pin it and install the hook:
+#
+#     bv govern use no-direct-to-main.policy.yaml
+#     bv install-hooks --target=git
+#
+# After that, a `git commit` made while on `main` (or `master`) is BLOCKED before
+# it lands, with a sealed proof — the agent is forced onto a feature branch no
+# matter what it was told. Experiment without committing:  `bv govern check`.
+#
+# YAML gotchas (so it parses): list literals are QUOTED strings — ["main","master"]
+# not [main, master] — and any predicate containing a list must use the indented
+# (block) form shown below, NOT the inline `predicate: { ... }` form.
+# ---------------------------------------------------------------------------
+api_version: sdlcgov/v1
+kind: Policy
+name: no-direct-to-main
+root: release_gate
+
+nodes:
+  # AND of every concern. The commit is allowed only if ALL children pass.
+  - id: release_gate
+    type: and
+    children: [not_on_main, no_hardcoded_secrets, tests_green]
+
+  # The headline rule: the working branch must not be a protected branch.
+  # `not_in` takes a LIST literal of QUOTED strings; add release names as you like.
+  - id: not_on_main
+    type: leaf
+    predicate:
+      kind: expr
+      expr: branch not_in ["main", "master"]
+
+  # No hardcoded secrets in the staged change.
+  - id: no_hardcoded_secrets
+    type: leaf
+    predicate:
+      kind: expr
+      expr: secrets_detected == false
+
+  # The repo's own tests must pass.
+  - id: tests_green
+    type: leaf
+    predicate:
+      kind: expr
+      expr: tests_passing == true
+
+# ---------------------------------------------------------------------------
+# More you can add (uncomment + wire into release_gate.children). See
+# POLICY_AUTHORING_GUIDE.md for the full fact list, grammar, and the identity
+# (signed-approval / quorum) section.
+#
+#   # A CVE ceiling (needs an SBOM/scan fact present) — block form, quoted list:
+#   - id: cve_ceiling
+#     type: leaf
+#     predicate:
+#       kind: expr
+#       expr: cve_max_severity not_in ["critical", "high"]
+#
+#   # Production deploys need an explicit sign-off (only enforced in prod):
+#   - id: prod_guard
+#     type: conditional
+#     condition: environment == "production"
+#     children: [prod_signed_off]
+#   - id: prod_signed_off
+#     type: leaf
+#     predicate:
+#       kind: expr
+#       expr: prod_signoff == true
+#
+#   # Sensitive changes need 2-of-3 SIGNED approvals (identity-bound — see guide):
+#   - id: security_quorum
+#     type: quorum
+#     quorum:
+#       policy:
+#         quorum: 2
+#         eligible_roles: [security, staff-engineer, sre]
+# ---------------------------------------------------------------------------
